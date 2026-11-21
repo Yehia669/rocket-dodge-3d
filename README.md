@@ -16,6 +16,7 @@ Then open `http://localhost:8766/`.
 
 - **WASD / Arrow keys** — move
 - **Space** — fire (a quick tap also fires)
+- **Touch D-pad + FIRE button** — appears automatically on phones/tablets
 - **R** — restart
 - **● REC** — record a WebM clip of the game canvas
 

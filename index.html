@@ -25,6 +25,32 @@
     position:fixed; bottom:18px; left:22px; z-index:10;
     font-size:14px; color:#8fa4cc; text-shadow:0 2px 8px #000;
   }
+  #touch {
+    display:none; position:fixed; left:0; right:0; bottom:22px;
+    z-index:25; padding:0 22px; justify-content:space-between;
+    align-items:flex-end; pointer-events:none;
+  }
+  #touch button {
+    pointer-events:auto; touch-action:none; user-select:none;
+    min-width:58px; min-height:58px; border-radius:16px;
+    border:1px solid rgba(255,255,255,.3);
+    background:rgba(18,27,50,.78); color:#fff;
+    font-size:20px; font-weight:900;
+    box-shadow:0 6px 18px rgba(0,0,0,.35);
+  }
+  #touch button:active { background:rgba(60,90,160,.95); transform:scale(.96); }
+  #touch .pad { display:flex; align-items:center; gap:8px; }
+  #touch .col { display:flex; flex-direction:column; gap:8px; }
+  #touch #fireBtn {
+    min-width:96px; min-height:96px; border-radius:50%;
+    background:rgba(190,35,45,.85); border-color:#ff8b8b; font-size:17px;
+  }
+  @media (pointer: coarse), (max-width: 700px) {
+    #touch { display:flex; }
+    #help { display:none; }
+    #hud { font-size:20px; }
+    #sub { font-size:12px; }
+  }
   #recBtn {
     position:fixed; top:16px; right:20px; z-index:30;
     padding:10px 16px; border-radius:12px; cursor:pointer;
@@ -75,6 +101,17 @@
   <button id="recBtn">● REC</button>
   <div id="recStatus">Recording… click STOP to save</div>
   <div id="help">WASD / Arrows = move &nbsp;•&nbsp; SPACE = fire &nbsp;•&nbsp; R = restart</div>
+  <div id="touch">
+    <div class="pad">
+      <button data-key="arrowleft" aria-label="Move left">◀</button>
+      <div class="col">
+        <button data-key="arrowup" aria-label="Move up">▲</button>
+        <button data-key="arrowdown" aria-label="Move down">▼</button>
+      </div>
+      <button data-key="arrowright" aria-label="Move right">▶</button>
+    </div>
+    <button id="fireBtn" aria-label="Fire">FIRE</button>
+  </div>
   <div id="cross"></div>
   <div id="loading">Loading rocket…</div>
   <div id="over"><div class="box"><h1>GAME OVER</h1><p>Score: <span id="finalScore">0</span></p><p style="font-size:14px;color:#9aa8c7">Press R to fly again</p></div></div>
@@ -261,16 +298,19 @@ function explode(pos, size=1) {
 
 /* ---------- input / state ---------- */
 const keys = {};
+function fireNow() {
+  if (!gameOver && cooldown <= 0) {
+    fireBullet();
+    cooldown = .16;
+  }
+}
 addEventListener('keydown', (e) => {
   if (e.code === 'Space' || e.key === ' ') {
     keys.space = true;
     e.preventDefault();
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     // Fire on the key press itself, so even a very quick tap is never missed.
-    if (!gameOver && cooldown <= 0) {
-      fireBullet();
-      cooldown = .16;
-    }
+    fireNow();
   } else {
     keys[e.key.toLowerCase()] = true;
   }
@@ -282,6 +322,26 @@ addEventListener('keyup', (e) => {
 });
 addEventListener('pointerdown', () => {
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+});
+
+// Touch controls for phones and tablets.
+document.querySelectorAll('#touch [data-key]').forEach((btn) => {
+  const k = btn.dataset.key;
+  const down = (e) => { e.preventDefault(); keys[k] = true; };
+  const up = (e) => { e.preventDefault(); keys[k] = false; };
+  btn.addEventListener('pointerdown', down);
+  btn.addEventListener('pointerup', up);
+  btn.addEventListener('pointercancel', up);
+  btn.addEventListener('pointerleave', up);
+});
+const fireBtn = document.getElementById('fireBtn');
+fireBtn.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  keys.space = true;
+  fireNow();
+});
+['pointerup', 'pointercancel', 'pointerleave'].forEach((type) => {
+  fireBtn.addEventListener(type, (e) => { e.preventDefault(); keys.space = false; });
 });
 
 const demo = new URLSearchParams(location.search).has('demo');
@@ -378,7 +438,7 @@ function animate() {
     rocketGroup.position.y = Math.max(-5,Math.min(6,rocketGroup.position.y));
 
     cooldown -= dt;
-    if ((keys.space || demo) && cooldown <= 0) { fireBullet(); cooldown = .16; }
+    if (keys.space || demo) fireNow();
 
     // bullets vs asteroids using real boxes
     for (let i=bullets.length-1;i>=0;i--) {
