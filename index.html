@@ -45,6 +45,10 @@
     min-width:96px; min-height:96px; border-radius:50%;
     background:rgba(190,35,45,.85); border-color:#ff8b8b; font-size:17px;
   }
+  #touch #restartBtn {
+    min-width:82px; min-height:64px; border-radius:16px;
+    background:rgba(30,42,75,.88); border-color:#9fb4dd; font-size:12px;
+  }
   @media (pointer: coarse), (max-width: 700px) {
     #touch { display:flex; }
     #help { display:none; }
@@ -110,11 +114,12 @@
       </div>
       <button data-key="arrowright" aria-label="Move right">▶</button>
     </div>
+    <button id="restartBtn" aria-label="Restart game">↻ RESTART</button>
     <button id="fireBtn" aria-label="Fire">FIRE</button>
   </div>
   <div id="cross"></div>
   <div id="loading">Loading rocket…</div>
-  <div id="over"><div class="box"><h1>GAME OVER</h1><p>Score: <span id="finalScore">0</span></p><p style="font-size:14px;color:#9aa8c7">Press R to fly again</p></div></div>
+  <div id="over"><div class="box"><h1>GAME OVER</h1><p>Score: <span id="finalScore">0</span></p><p style="font-size:14px;color:#9aa8c7">Press R or tap RESTART to fly again</p></div></div>
 
 <script type="module">
 import * as THREE from 'three';
@@ -191,6 +196,20 @@ const blueMat = new THREE.MeshStandardMaterial({ map:blueTex, metalness:.3, roug
 const windowMat = new THREE.MeshStandardMaterial({ color:0x0a4f9e, emissive:0x1a73ff, emissiveIntensity:1.1, metalness:.2, roughness:.12 });
 const flameMat = new THREE.MeshBasicMaterial({ color:0xff7a18, transparent:true, opacity:.9, blending:THREE.AdditiveBlending, depthWrite:false });
 
+// Clear hollow shell that sits over the visible model and acts as the hitbox.
+const shellMat = new THREE.MeshBasicMaterial({
+  color:0x66ffff, transparent:true, opacity:.10,
+  side:THREE.DoubleSide, depthWrite:false
+});
+const shellLineMat = new THREE.LineBasicMaterial({
+  color:0xa8ffff, transparent:true, opacity:.8, depthWrite:false
+});
+function addShellEdges(mesh) {
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 22), shellLineMat);
+  edges.name = 'Hitbox outline';
+  mesh.add(edges);
+}
+
 const fallback = new THREE.Group();
 const fbBody = new THREE.Mesh(new THREE.CylinderGeometry(.45,.45,2.3,12), redMat);
 fbBody.rotation.x = Math.PI/2;
@@ -199,6 +218,17 @@ const fbNose = new THREE.Mesh(new THREE.ConeGeometry(.45,1,12), whiteMat);
 fbNose.rotation.x = -Math.PI/2; fbNose.position.z = -1.6;
 fallback.add(fbNose);
 rocketGroup.add(fallback);
+
+const fallbackShell = fallback.clone(true);
+fallbackShell.traverse((c) => {
+  if (!c.isMesh) return;
+  addShellEdges(c);
+  c.material = shellMat;
+  c.castShadow = false;
+});
+fallbackShell.scale.setScalar(1.06);
+rocketGroup.add(fallbackShell);
+rocketGroup.userData.hitbox = fallbackShell;
 
 const exhaust = new THREE.PointLight(0xff6a1a, 5, 16);
 exhaust.position.set(0,0,1);
@@ -221,7 +251,18 @@ loader.load('rocket.glb', (gltf) => {
     else c.material = redMat;
   });
   rocketGroup.add(rocket);
+  const rocketShell = rocket.clone(true);
+  rocketShell.traverse((c) => {
+    if (!c.isMesh) return;
+    addShellEdges(c);
+    c.material = shellMat;
+    c.castShadow = false;
+  });
+  rocketShell.scale.multiplyScalar(1.06);
+  rocketGroup.add(rocketShell);
   rocketGroup.remove(fallback);
+  rocketGroup.remove(fallbackShell);
+  rocketGroup.userData.hitbox = rocketShell;
   document.getElementById('loading').style.display = 'none';
 }, undefined, () => {
   document.getElementById('loading').textContent = 'Using backup rocket';
@@ -249,6 +290,10 @@ function spawnAsteroid(initial=false) {
     new THREE.MeshStandardMaterial({ map:rockTex, bumpMap:rockTex, bumpScale:.05, roughness:.95 })
   );
   a.scale.setScalar(s);
+  const shell = new THREE.Mesh(a.geometry, shellMat);
+  shell.scale.setScalar(1.06);
+  addShellEdges(shell);
+  a.add(shell);
   a.position.set(
     (Math.random()-.5)*18,
     (Math.random()-.5)*10 + 1,
@@ -260,6 +305,7 @@ function spawnAsteroid(initial=false) {
     spin: new THREE.Vector3((Math.random()-.5)*2,(Math.random()-.5)*2,(Math.random()-.5)*2),
     hp: small ? 5 : 8, small, hitTimer:0
   };
+  a.userData.hitbox = shell;
   scene.add(a);
   asteroids.push(a);
 }
@@ -343,6 +389,10 @@ fireBtn.addEventListener('pointerdown', (e) => {
 ['pointerup', 'pointercancel', 'pointerleave'].forEach((type) => {
   fireBtn.addEventListener(type, (e) => { e.preventDefault(); keys.space = false; });
 });
+document.getElementById('restartBtn').addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  restart();
+});
 
 const demo = new URLSearchParams(location.search).has('demo');
 const scoreEl = document.getElementById('score');
@@ -404,13 +454,15 @@ const tmpBoxBullet = new THREE.Box3();
 // Small read-only hook so the rebuild can be verified in the browser console.
 window.__gameDebug = {
   snapshot() {
-    const rocket = new THREE.Box3().setFromObject(rocketGroup);
+    const rocket = new THREE.Box3().setFromObject(rocketGroup.userData.hitbox || rocketGroup);
     return {
       bullets: bullets.length,
       asteroids: asteroids.length,
       score, kills, hits,
       space: !!keys.space,
       cooldown: Number(cooldown.toFixed(3)),
+      rocketHitbox: !!rocketGroup.userData.hitbox,
+      asteroidHitboxes: asteroids.filter(a => !!a.userData.hitbox).length,
       rocketMin: rocket.min.toArray(),
       rocketMax: rocket.max.toArray()
     };
@@ -448,7 +500,7 @@ function animate() {
       let gone = false;
       tmpBoxBullet.setFromObject(b.mesh);
       for (const a of asteroids) {
-        tmpBoxA.setFromObject(a);
+        tmpBoxA.setFromObject(a.userData.hitbox || a);
         if (tmpBoxBullet.intersectsBox(tmpBoxA)) {
           a.userData.hp--; hits++; a.userData.hitTimer = .14;
           explode(b.mesh.position, .2);
@@ -468,7 +520,7 @@ function animate() {
     }
 
     // asteroids + rocket collision using real boxes
-    tmpBoxB.setFromObject(rocketGroup);
+    tmpBoxB.setFromObject(rocketGroup.userData.hitbox || rocketGroup);
     for (const a of asteroids) {
       a.position.z += a.userData.speed*dt;
       a.rotation.x += a.userData.spin.x*dt;
@@ -476,7 +528,7 @@ function animate() {
       a.rotation.z += a.userData.spin.z*dt;
       if (a.userData.hitTimer > 0) a.userData.hitTimer -= dt;
       if (a.position.z > 14) a.position.set((Math.random()-.5)*18,(Math.random()-.5)*10+1,-105-Math.random()*40);
-      tmpBoxA.setFromObject(a);
+      tmpBoxA.setFromObject(a.userData.hitbox || a);
       if (tmpBoxB.intersectsBox(tmpBoxA)) {
         gameOver = true;
         explode(rocketGroup.position, 1.4);
